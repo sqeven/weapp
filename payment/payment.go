@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sqeven/weapp/util"
+	"github.com/valyala/fasthttp"
 )
 
 const (
@@ -305,6 +306,39 @@ func HandlePaidNotify(res http.ResponseWriter, req *http.Request, fuck func(Paid
 
 	res.WriteHeader(http.StatusOK)
 	_, err = res.Write(b)
+
+	return err
+}
+
+// HandlePaidNotify 处理支付结果通知
+func HandlePaidNotifyWithFastHttp(ctx* fasthttp.RequestCtx, fuck func(PaidNotify) (bool, string)) error {
+	//body, err := ioutil.ReadAll(req.Body)
+	//if err != nil {
+	//	return err
+	//}
+	body := ctx.PostBody()
+
+	var ntf paidNotify
+	if err := xml.Unmarshal(body, &ntf); err != nil {
+		return err
+	}
+
+	if err := ntf.Check(); err != nil {
+		return err
+	}
+
+	replay := newReplay(fuck(ntf.PaidNotify))
+
+	b, err := xml.Marshal(replay)
+	if err != nil {
+		return err
+	}
+
+	//res.WriteHeader(http.StatusOK)
+	//_, err = res.Write(b)
+
+	ctx.Response.SetStatusCode(http.StatusOK)
+	_,err = ctx.Write(b)
 
 	return err
 }

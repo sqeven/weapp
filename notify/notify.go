@@ -11,6 +11,12 @@ import (
 
 	"github.com/sqeven/weapp/message"
 	"github.com/sqeven/weapp/util"
+	"github.com/valyala/fasthttp"
+)
+
+const (
+	k_notify_http_origin = ""
+	k_notify_http_fasthttp = "fasthttp"
 )
 
 // Server 微信服务接收器
@@ -22,8 +28,11 @@ type Server struct {
 	token          string // 微信服务器验证令牌
 	EncodingAESKey string // 消息加密密钥
 
-	Writer  http.ResponseWriter
-	Request *http.Request
+	//Writer  http.ResponseWriter
+	//Request *http.Request
+
+	httpType string
+	FastHttpCtx * fasthttp.RequestCtx
 
 	textMessageHandler  func(Text)    // 文本消息处理器
 	cardMessageHandler  func(Card)    // 卡片消息处理器
@@ -54,6 +63,15 @@ func NewServer(res http.ResponseWriter, req *http.Request) *Server {
 	}
 }
 
+func NewServerWithFastHttp(ctx* fasthttp.RequestCtx) *Server {
+	return &Server{
+		//Request: req,
+		//Writer:  res,
+		httpType: k_notify_http_fasthttp,
+		FastHttpCtx:ctx,
+	}
+}
+
 // HandleTextMessage 新建 Server 并设置文本消息处理器
 func (srv *Server) HandleTextMessage(fuck func(Text)) {
 	srv.textMessageHandler = fuck
@@ -76,67 +94,138 @@ func (srv *Server) HandleEvent(fuck func(Mixture)) {
 
 // Serve 启动服务
 func (srv *Server) Serve() error {
-	switch srv.Request.Method {
-	case "POST":
+	if srv.httpType == k_notify_http_fasthttp {
+		method := string(srv.FastHttpCtx.Method())
+		switch method {
+		case "POST":
 
-		// 处理加密消息
-		if encrypted(srv.Request) {
-			return errors.New("SDK 暂时还不支持加密消息")
-			// dev: handle encrypted message
-		}
+			// 处理加密消息
+			if string(srv.FastHttpCtx.PostArgs().Peek("encrypt_type")) == "aes"{
+				//util.GetQuery(req, "encrypt_type") == "aes"
+				//if encrypted(srv.Request) {
+				return errors.New("SDK 暂时还不支持加密消息")
+				// dev: handle encrypted message
+			}
 
-		body, err := ioutil.ReadAll(srv.Request.Body)
-		if err != nil {
+			//body, err := ioutil.ReadAll(srv.Request.Body)
+			body := srv.FastHttpCtx.PostBody()
+
+			var mix Mixture
+			switch t := string(srv.FastHttpCtx.Request.Header.Peek("Content-Type")); t {
+			case "application/json":
+				if err := json.Unmarshal(body, &mix); err != nil {
+					return err
+				}
+			case "application/xml":
+				if err := xml.Unmarshal(body, &mix); err != nil {
+					return err
+				}
+			default:
+				return errors.New("unknown content type: " + t)
+			}
+
+			switch mix.Type {
+			case message.TextMsg: // 文本消息
+				if srv.textMessageHandler != nil {
+					msg := mix.Text
+					srv.textMessageHandler(msg)
+				}
+			case message.ImgMsg: // 图片消息
+				if srv.imageMessageHandler != nil {
+					msg := mix.Image
+					srv.imageMessageHandler(msg)
+				}
+			case message.CardMsg: // 卡片消息
+				if srv.cardMessageHandler != nil {
+					msg := mix.Card
+					srv.cardMessageHandler(msg)
+				}
+			case message.Event: // 事件
+				if srv.eventHandler != nil {
+					srv.eventHandler(mix)
+				}
+			default:
+				return errors.New("无效的消息类型: " + string(mix.Type))
+			}
+
+			//srv.Writer.WriteHeader(http.StatusOK)
+			//_, err = io.WriteString(srv.Writer, "SUCCESS")
+			srv.FastHttpCtx.Response.SetStatusCode(http.StatusOK)
+			_, err := srv.FastHttpCtx.Write([]byte("SUCCESS"))
 			return err
+		case "GET":
+			//srv.Writer.WriteHeader(http.StatusOK)
+			//_, err := io.WriteString(srv.Writer, util.GetQuery(srv.Request, "echostr"))
+			echostr := srv.FastHttpCtx.QueryArgs().Peek("echostr")
+			srv.FastHttpCtx.Response.SetStatusCode(http.StatusOK)
+			_, err := srv.FastHttpCtx.Write(echostr)
+			return err
+		default:
+			return errors.New("无效的请求方法: " + method)
 		}
+	}else{
+		switch srv.Request.Method {
+		case "POST":
 
-		var mix Mixture
-		switch t := srv.Request.Header.Get("Content-Type"); t {
-		case "application/json":
-			if err := json.Unmarshal(body, &mix); err != nil {
+			// 处理加密消息
+			if encrypted(srv.Request) {
+				return errors.New("SDK 暂时还不支持加密消息")
+				// dev: handle encrypted message
+			}
+
+			body, err := ioutil.ReadAll(srv.Request.Body)
+			if err != nil {
 				return err
 			}
-		case "application/xml":
-			if err := xml.Unmarshal(body, &mix); err != nil {
-				return err
-			}
-		default:
-			return errors.New("unknown content type: " + t)
-		}
 
-		switch mix.Type {
-		case message.TextMsg: // 文本消息
-			if srv.textMessageHandler != nil {
-				msg := mix.Text
-				srv.textMessageHandler(msg)
+			var mix Mixture
+			switch t := srv.Request.Header.Get("Content-Type"); t {
+			case "application/json":
+				if err := json.Unmarshal(body, &mix); err != nil {
+					return err
+				}
+			case "application/xml":
+				if err := xml.Unmarshal(body, &mix); err != nil {
+					return err
+				}
+			default:
+				return errors.New("unknown content type: " + t)
 			}
-		case message.ImgMsg: // 图片消息
-			if srv.imageMessageHandler != nil {
-				msg := mix.Image
-				srv.imageMessageHandler(msg)
-			}
-		case message.CardMsg: // 卡片消息
-			if srv.cardMessageHandler != nil {
-				msg := mix.Card
-				srv.cardMessageHandler(msg)
-			}
-		case message.Event: // 事件
-			if srv.eventHandler != nil {
-				srv.eventHandler(mix)
-			}
-		default:
-			return errors.New("无效的消息类型: " + string(mix.Type))
-		}
 
-		srv.Writer.WriteHeader(http.StatusOK)
-		_, err = io.WriteString(srv.Writer, "SUCCESS")
-		return err
-	case "GET":
-		srv.Writer.WriteHeader(http.StatusOK)
-		_, err := io.WriteString(srv.Writer, util.GetQuery(srv.Request, "echostr"))
-		return err
-	default:
-		return errors.New("无效的请求方法: " + srv.Request.Method)
+			switch mix.Type {
+			case message.TextMsg: // 文本消息
+				if srv.textMessageHandler != nil {
+					msg := mix.Text
+					srv.textMessageHandler(msg)
+				}
+			case message.ImgMsg: // 图片消息
+				if srv.imageMessageHandler != nil {
+					msg := mix.Image
+					srv.imageMessageHandler(msg)
+				}
+			case message.CardMsg: // 卡片消息
+				if srv.cardMessageHandler != nil {
+					msg := mix.Card
+					srv.cardMessageHandler(msg)
+				}
+			case message.Event: // 事件
+				if srv.eventHandler != nil {
+					srv.eventHandler(mix)
+				}
+			default:
+				return errors.New("无效的消息类型: " + string(mix.Type))
+			}
+
+			srv.Writer.WriteHeader(http.StatusOK)
+			_, err = io.WriteString(srv.Writer, "SUCCESS")
+			return err
+		case "GET":
+			srv.Writer.WriteHeader(http.StatusOK)
+			_, err := io.WriteString(srv.Writer, util.GetQuery(srv.Request, "echostr"))
+			return err
+		default:
+			return errors.New("无效的请求方法: " + srv.Request.Method)
+		}
 	}
 }
 
