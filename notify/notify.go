@@ -28,8 +28,8 @@ type Server struct {
 	token          string // 微信服务器验证令牌
 	EncodingAESKey string // 消息加密密钥
 
-	//Writer  http.ResponseWriter
-	//Request *http.Request
+	Writer  http.ResponseWriter
+	Request *http.Request
 
 	httpType string
 	FastHttpCtx * fasthttp.RequestCtx
