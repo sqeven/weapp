@@ -71,6 +71,7 @@ func (t *RedPacket) prepare(key string) (redpacket, error) {
 		"act_name":     traRed.ActName,
 		"remark":       traRed.Remark,
 		"scene_id":     traRed.SceneId,
+		"nonce_str":    traRed.NonceStr,
 	}
 
 	if t.IP == "" {
