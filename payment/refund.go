@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sqeven/weapp/util"
+	"github.com/valyala/fasthttp"
 )
 
 const (
@@ -272,6 +273,59 @@ func HandleRefundedNotify(res http.ResponseWriter, req *http.Request, key string
 
 	res.WriteHeader(http.StatusOK)
 	_, err = res.Write(b)
+
+	return err
+}
+
+// HandleRefundedNotify 处理退款结果通知
+// key: 微信支付 KEY
+func HandleRefundedNotifyWithFastHttp(ctx* fasthttp.RequestCtx, key string, fuck func(RefundedNotify) (bool, string)) error {
+	body := ctx.PostBody()
+
+	var ref refundNotify
+
+	if err := xml.Unmarshal(body, &ref); err != nil {
+		return err
+	}
+
+	if err := ref.Check(); err != nil {
+		return err
+	}
+
+	ciphertext, err := base64.StdEncoding.DecodeString(ref.Ciphertext)
+	if err != nil {
+		return err
+	}
+	key, err = util.MD5(key)
+	if err != nil {
+		return err
+	}
+	key = strings.ToLower(key)
+
+	bts, err := util.AesECBDecrypt(ciphertext, []byte(key))
+	if err != nil {
+		return err
+	}
+
+	ntf := RefundedNotify{
+		AppID:    ref.AppID,
+		NonceStr: ref.NonceStr,
+		MchID:    ref.MchID,
+	}
+
+	if err := xml.Unmarshal(bts, &ntf); err != nil {
+		return err
+	}
+
+	pr := newReplay(fuck(ntf))
+
+	b, err := xml.Marshal(pr)
+	if err != nil {
+		return err
+	}
+
+	ctx.Response.SetStatusCode(http.StatusOK)
+	_,err = ctx.Write(b)
 
 	return err
 }
