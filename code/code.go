@@ -32,6 +32,10 @@ type QRCoder struct {
 	LineColor Color `json:"line_color,omitempty"`
 	// isHyaline 是否需要透明底色
 	IsHyaline bool `json:"is_hyaline,omitempty"`
+	// check_path 参数数据
+	CheckPath bool `json:"check_path,omitempty"`
+	// env_version 参数数据
+	EnvVersion string `json:"env_version,omitempty"`
 }
 
 // Color QRCode color
